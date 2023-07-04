@@ -132,11 +132,10 @@ def write(rows, path, new_scenes, new_frames):
 
 def trajectory_type(rows, path, fps, track_id=0, args=None):
     """ Categorization of all scenes """
-    print(path)
+
     ## Read
     reader = trajnetplusplustools.Reader(path, scene_type='paths')
     scenes = [s for _, s in reader.scenes()]
-    print(scenes)
     ## Filtered Frames and Scenes
     new_frames = set()
     new_scenes = []

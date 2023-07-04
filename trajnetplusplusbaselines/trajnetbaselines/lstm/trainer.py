@@ -29,8 +29,8 @@ class Trainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, lr_scheduler=None,
                  device=None, batch_size=8, obs_length=9, pred_length=12, augment=True,
                  normalize_scene=False, save_every=1, start_length=0, obs_dropout=False,
-                 augment_noise=False, val_flag=True, residual=False, curvature_loss=False):
-        self.model = model if model is not None else LSTM(residual=residual)
+                 augment_noise=False, val_flag=True, curvature_loss=False, mirror_train=0):
+        self.model = model if model is not None else LSTM()
         self.criterion = criterion if criterion is not None else PredictionLoss()
         self.optimizer = optimizer if optimizer is not None else \
                          torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -57,8 +57,10 @@ class Trainer(object):
         self.obs_dropout = obs_dropout
 
         self.val_flag = val_flag
+        self.mirror_train = mirror_train
 
     def loop(self, train_scenes, val_scenes, train_goals, val_goals, out, epochs=35, start_epoch=0):
+        self.epochs = epochs
         for epoch in range(start_epoch, epochs):
             if epoch % self.save_every == 0:
                 state = {'epoch': epoch, 'state_dict': self.model.state_dict(),
@@ -98,9 +100,8 @@ class Trainer(object):
             scene_start = time.time()
 
             ## make new scene
-            # print(paths)
             scene = trajnetplusplustools.Reader.paths_to_xy(paths)
-            # print(scene.shape)
+
             ## get goals
             if goals is not None:
                 scene_goal = np.array(goals[filename][scene_id])
@@ -119,8 +120,16 @@ class Trainer(object):
             if self.augment_noise:
                 scene = augmentation.add_noise(scene, thresh=0.02, ped='neigh')
 
+            # print(scene[0,:,0].shape)
+            mid_x, mid_y = np.nanmean(scene[0,:,0]), np.nanmean(scene[0,:,1])
+            # print(mid_x, mid_y)
+            if self.epochs - epoch < self.mirror_train//2:
+              scene[:,:,1] = 2*mid_y - scene[:,:,1]
+            elif self.epochs - epoch < self.mirror_train:
+              scene[:,:,0] = 2*mid_x - scene[:,:,0]
+            
+            # scene[:,:,1] = 2*mid_y - scene[:,:,1]
             ## Augment scene to batch of scenes
-            # print(scene.shape)
             batch_scene.append(scene)
             batch_split.append(int(scene.shape[1]))
             batch_scene_goal.append(scene_goal)
@@ -128,7 +137,6 @@ class Trainer(object):
             if ((scene_i + 1) % self.batch_size == 0) or ((scene_i + 1) == len(scenes)):
                 ## Construct Batch
                 batch_scene = np.concatenate(batch_scene, axis=1)
-                # print(batch_scene.shape)
                 batch_scene_goal = np.concatenate(batch_scene_goal, axis=0)
                 batch_split = np.cumsum(batch_split)
                 
@@ -196,6 +204,8 @@ class Trainer(object):
             if self.normalize_scene:
                 scene, _, _, scene_goal = center_scene(scene, self.obs_length, goals=scene_goal)
 
+            # print(scene)
+
             ## Augment scene to batch of scenes
             batch_scene.append(scene)
             batch_split.append(int(scene.shape[1]))
@@ -256,21 +266,21 @@ class Trainer(object):
         observed = batch_scene[self.start_length:self.obs_length].clone()
         prediction_truth = batch_scene[self.obs_length:self.seq_length-1].clone()
         targets = batch_scene[self.obs_length:self.seq_length] - batch_scene[self.obs_length-1:self.seq_length-1]
+        # targets_pos = batch_scene[self.obs_length:self.seq_length]
 
-        rel_outputs, outputs = self.model(observed, batch_scene_goal, batch_split, prediction_truth)
-        # print("batchScene",batch_scene.size())
-        # print("obsLength", self.obs_length)
-        # print("predLen", self.pred_length)
-        # print("batchSplit", batch_split)
-        # print("obs", observed.size())
-        # print("OUTPUTS =>", outputs.size())
+        rel_outputs, outputs, normals = self.model(observed, batch_scene_goal, batch_split, prediction_truth)
+
+        # print("TARGETS SIZE: ", targets.size())
+        # print("NORMALS: ", len(normals))
+
         # For collision loss calculation
         primary_prediction = batch_scene[-self.pred_length:].clone()
         primary_prediction[:, batch_split[:-1]] = outputs[-self.pred_length:, batch_split[:-1]]
 
         ## Loss wrt primary tracks of each scene only
+        # print("Going for loss")
         loss = self.criterion(rel_outputs[-self.pred_length:], targets, batch_split, primary_prediction) * self.batch_size
-
+        # print("Back from loss")
         if self.curvature_loss:
             curvature_loss = 0
             alpha = 0.7
@@ -287,7 +297,6 @@ class Trainer(object):
             # error => only one element tensors can be converted to Python scalars
             cl = torch.tensor([curvature_loss])
             loss  = torch.add(loss,cl)
-
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -370,6 +379,7 @@ def main(epochs=25):
     parser.add_argument('--sample', default=1.0, type=float,
                         help='sample ratio when loading train/val scenes')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--mirror_train', type=int, default=10)
 
     ## Augmentations
     parser.add_argument('--augment', action='store_true',
@@ -380,11 +390,6 @@ def main(epochs=25):
                         help='flag to add noise to observations for robustness')
     parser.add_argument('--obs_dropout', action='store_true',
                         help='perform observation length dropout')
-
-    ## Residual
-    parser.add_argument('--residual', action='store_true', help='use residual lstm')
-
-    ##Curvature Loss
     parser.add_argument('--curvature_loss', action='store_true', help='add curvature loss')
 
     ## Loading pre-trained models
@@ -427,6 +432,7 @@ def main(epochs=25):
     hyperparameters.add_argument('--norm', default=0, type=int,
                                  help='normalization scheme for input batch during grid-based pooling')
     hyperparameters.add_argument('--intent_pool', action='store_true', help='use intent pooling')
+
     ## Non-Grid-based pooling
     hyperparameters.add_argument('--no_vel', action='store_true',
                                  help='flag to not consider relative velocity of neighbours')
@@ -451,12 +457,12 @@ def main(epochs=25):
     random.seed(args.seed)
 
     ## Define location to save trained model
-    if not os.path.exists('../OUTPUT_BLOCK/{}'.format(args.path)):
-        os.makedirs('../OUTPUT_BLOCK/{}'.format(args.path))
+    if not os.path.exists('OUTPUT_BLOCK/{}'.format(args.path)):
+        os.makedirs('OUTPUT_BLOCK/{}'.format(args.path))
     if args.goals:
-        args.output = '../OUTPUT_BLOCK/{}/lstm_goals_{}_{}.pkl'.format(args.path, args.type, args.output)
+        args.output = 'OUTPUT_BLOCK/{}/lstm_goals_{}_{}.pkl'.format(args.path, args.type, args.output)
     else:
-        args.output = '../OUTPUT_BLOCK/{}/lstm_{}_{}.pkl'.format(args.path, args.type, args.output)
+        args.output = 'OUTPUT_BLOCK/{}/lstm_{}_{}.pkl'.format(args.path, args.type, args.output)
 
     # configure logging
     from pythonjsonlogger import jsonlogger
@@ -493,9 +499,8 @@ def main(epochs=25):
     ## Prepare data
     train_scenes, train_goals, _ = prepare_data(args.path, subset='/train/', sample=args.sample, goals=args.goals)
     val_scenes, val_goals, val_flag = prepare_data(args.path, subset='/val/', sample=args.sample, goals=args.goals)
-    # print(train_scenes[0].size())
+
     ## pretrained pool model (if any)
-    # print(train_scenes[0][2])
     pretrained_pool = None
 
     # create interaction/pooling modules
@@ -518,13 +523,13 @@ def main(epochs=25):
                                 out_dim=args.pool_dim, embedding_arch=args.embedding_arch,
                                 constant=args.pool_constant, pretrained_pool_encoder=pretrained_pool,
                                 norm=args.norm, layer_dims=args.layer_dims, latent_dim=args.latent_dim)
-    # print(pool.size())
+
     # create forecasting model
     model = LSTM(pool=pool,
                  embedding_dim=args.coordinate_embedding_dim,
                  hidden_dim=args.hidden_dim,
                  goal_flag=args.goals,
-                 goal_dim=args.goal_dim, residual=args.residual, intent_pool = args.intent_pool)
+                 goal_dim=args.goal_dim, intent_pool = args.intent_pool)
 
     # optimizer and schedular
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -560,7 +565,7 @@ def main(epochs=25):
                       criterion=criterion, batch_size=args.batch_size, obs_length=args.obs_length,
                       pred_length=args.pred_length, augment=args.augment, normalize_scene=args.normalize_scene,
                       save_every=args.save_every, start_length=args.start_length, obs_dropout=args.obs_dropout,
-                      augment_noise=args.augment_noise, val_flag=val_flag, curvature_loss=args.curvature_loss)
+                      augment_noise=args.augment_noise, val_flag=val_flag, curvature_loss=args.curvature_loss, mirror_train=args.mirror_train)
     trainer.loop(train_scenes, val_scenes, train_goals, val_goals, args.output, epochs=args.epochs, start_epoch=start_epoch)
 
 

@@ -1,7 +1,11 @@
+LICENSE
+README.rst
 setup.py
+tests/test_lstm_loss.py
+tests/test_lstm_modules.py
+tests/test_pooling.py
 trajnetbaselines/__init__.py
 trajnetbaselines/augmentation.py
-trajnetbaselines/residual_lstm.py
 trajnetbaselines.egg-info/PKG-INFO
 trajnetbaselines.egg-info/SOURCES.txt
 trajnetbaselines.egg-info/dependency_links.txt
@@ -13,6 +17,8 @@ trajnetbaselines/lstm/gridbased_pooling.py
 trajnetbaselines/lstm/loss.py
 trajnetbaselines/lstm/lstm.py
 trajnetbaselines/lstm/modules.py
+trajnetbaselines/lstm/more_non_gridbased_pooling.py
+trajnetbaselines/lstm/non_gridbased_pooling.py
 trajnetbaselines/lstm/plot_log.py
 trajnetbaselines/lstm/profile_train.py
 trajnetbaselines/lstm/trainer.py

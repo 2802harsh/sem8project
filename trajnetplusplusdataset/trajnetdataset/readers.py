@@ -15,7 +15,7 @@ def biwi(line):
     return TrackRow(int(float(line[0]) - 1),  # shift from 1-index to 0-index
                     int(float(line[1])),
                     float(line[2]),
-                    float(line[3]))
+                    float(line[4]))
 
 def crowds_interpolate_person(ped_id, person_xyf):
     ## Earlier

@@ -64,13 +64,10 @@ class Scenes(object):
             return row
 
         # scenes: pedestrian of interest, [frames]
-        def check(p_path):
-          print(len(p_path[1]))
-          return len(p_path[1]) >= self.chunk_size
         scenes = (
             rows
             .groupBy(lambda r: r.pedestrian)
-            .filter(check)
+            .filter(lambda p_path: len(p_path[1]) >= self.chunk_size)
             .mapValues(lambda path: sorted(path, key=lambda p: p.frame))
             .flatMapValues(lambda path: [
                 [path[ii].frame for ii in range(i, i + self.chunk_size)]

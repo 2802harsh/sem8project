@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cd ../trajnetplusplusbaselines-1
+cd ../trajnetplusplusbaselines
 pip install -e .
 cd ../trajnetpluslusdataset
 pip install -e .
@@ -16,4 +16,4 @@ pip install cmake
 pip install cython
 python setup.py build
 python setup.py install
-cd ../trajnetplusplusbaselines-1
+cd ../trajnetplusplusbaselines

@@ -15,6 +15,11 @@ setup(
     ],
     license='MIT',
     description='Trajnet baselines.',
+    long_description=open('README.rst').read(),
+    author='Sven Kreiss',
+    author_email='me@svenkreiss.com',
+    url='https://github.com/svenkreiss/trajnetbaselines',
+
     install_requires=[
         'numpy',
         'pykalman',

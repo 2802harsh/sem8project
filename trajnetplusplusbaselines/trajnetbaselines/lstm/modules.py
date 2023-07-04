@@ -51,14 +51,18 @@ class InputEmbedding(torch.nn.Module):
 class Hidden2Normal(torch.nn.Module):
     def __init__(self, hidden_dim):
         super(Hidden2Normal, self).__init__()
-        self.linear = torch.nn.Linear(hidden_dim, 5)
+        self.linear = torch.nn.Linear(hidden_dim, 10)
 
     def forward(self, hidden_state):
         normal = self.linear(hidden_state)
 
         # numerically stable output ranges
-        normal[:, 2] = 0.01 + 0.2 * torch.sigmoid(normal[:, 2])  # sigma 1
-        normal[:, 3] = 0.01 + 0.2 * torch.sigmoid(normal[:, 3])  # sigma 2
-        normal[:, 4] = 0.7 * torch.sigmoid(normal[:, 4])  # rho
+        normal[:, 2] = 0.01 + 0.2 * torch.sigmoid(normal[:, 2])  # sigmax 1
+        normal[:, 3] = 0.01 + 0.2 * torch.sigmoid(normal[:, 3])  # sigmay 1
+        normal[:, 4] = 0.7 * torch.sigmoid(normal[:, 4])  # rho1
+        # normal[:, 5] = 0.7 * torch.sigmoid(normal[:, 5])  # rho
+        normal[:, 7] = 0.01 + 0.2 * torch.sigmoid(normal[:, 7])  # sigmax 2
+        normal[:, 8] = 0.01 + 0.2 * torch.sigmoid(normal[:, 8])  # sigmay 2
+        normal[:, 9] = 0.7 * torch.sigmoid(normal[:, 9])  # rho2
 
         return normal

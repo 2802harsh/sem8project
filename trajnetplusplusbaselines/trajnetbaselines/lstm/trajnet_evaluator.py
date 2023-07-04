@@ -28,7 +28,6 @@ def load_predictor(model, device='cpu'):
 
 def get_predictions(args):
     """Get model predictions for each test scene and write the predictions in appropriate folders"""
-    print(args.path)
     ## List of .json file inside the args.path (waiting to be predicted by the testing model)
     datasets = sorted([f.split('.')[-2] for f in os.listdir(args.path.replace('_pred', '')) if not f.startswith('.') and f.endswith('.ndjson')])
 
@@ -68,7 +67,7 @@ def get_predictions(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path', default='collision_test',
+    parser.add_argument('--path', default='trajdata',
                         help='directory of data to test')
     parser.add_argument('--output', nargs='+',
                         help='relative path to saved model')
@@ -92,7 +91,7 @@ def main():
 
     args.output = args.output if args.output is not None else []
     args.path = 'DATA_BLOCK/' + args.path + '/test_pred/'
-    # print(args.path)
+
     ## Writes to Test_pred
     ## Does NOT overwrite existing predictions if they already exist ###
     get_predictions(args)

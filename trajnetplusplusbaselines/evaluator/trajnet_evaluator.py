@@ -219,8 +219,6 @@ def eval(gt, input_file, args):
     ## sub_indexes, indexes is dictionary deciding which scenes are in which type
     indexes = defaultdict(list)
     sub_indexes = defaultdict(list)
-
-    # print(reader_gt.scenes_by_id)
     
     for scene in reader_gt.scenes_by_id:
         tags = reader_gt.scenes_by_id[scene].tag
@@ -244,22 +242,18 @@ def trajnet_evaluate(args):
     for num, model_name in enumerate(model_names):
         print(model_name)
         model_preds = sorted([f for f in os.listdir(args.path + model_name) if not f.startswith('.')])
-        print(model_preds)
+
         # Simple Collision Test (if present in test_private)
         col_result = collision_test(model_preds, model_name, args)
-        print(args.path)
         table.add_collision_entry(labels[num], col_result)
 
-        # pred_datasets = [args.path + model_name + '/' + f for f in model_preds if 'collision_test.ndjson' not in f]
-        # true_datasets = [args.path.replace('pred', 'private') + f for f in model_preds if 'collision_test.ndjson' not in f]
+        pred_datasets = [args.path + model_name + '/' + f for f in model_preds if 'collision_test.ndjson' not in f]
+        true_datasets = [args.path.replace('pred', 'private') + f for f in model_preds if 'collision_test.ndjson' not in f]
 
-        pred_datasets = [args.path + model_name + '/' + f for f in model_preds]
-        true_datasets = [args.path.replace('pred', 'private') + f for f in model_preds]
-        print(pred_datasets, true_datasets, sep=' | ')
         # Evaluate predicted datasets with True Datasets
         results = {pred_datasets[i].replace(args.path, '').replace('.ndjson', ''):
                    eval(true_datasets[i], pred_datasets[i], args) for i in range(len(true_datasets))}
-        print(results)
+
         # Add results to Table
         final_result, sub_final_result = table.add_entry(labels[num], results)
 

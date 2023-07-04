@@ -121,13 +121,6 @@ def write(input_rows, output_file, args):
     """ Write Valid Scenes without categorization """
 
     print(" Entering Writing ")
-    # print(input_rows.count())
-    # def check(r):
-    #   print(len(r[1]))
-    #   return r>=21
-    # print("HERE")
-    # input_rows.filter(check)
-    return
     ## To handle two different time stamps 7:00 and 17:00 of cff
     if args.order_frames:
         frames = sorted(set(input_rows.map(lambda r: r.frame).toLocalIterator()),
@@ -258,24 +251,19 @@ def main():
 
     # Real datasets conversion
     if not args.synthetic:
-        # write(biwi(sc, 'data/raw/controlled/file.txt'),
-        #       'output_pre/test/file.ndjson', args)
-        write(biwi(sc, 'data/trajnet_original/biwi/biwi_hotel.txt'),
+        write(biwi(sc, 'data/raw/biwi/seq_hotel/obsmat.txt'),
               'output_pre/{split}/biwi_hotel.ndjson', args)
         categorize(sc, 'output_pre/{split}/biwi_hotel.ndjson', args)
-        write(biwi(sc, 'data/trajnet_original/crowds/crowds_zara02.txt'),
-              'output_pre/{split}/crowds_zara02.ndjson', args)
-        categorize(sc, 'output_pre/{split}/crowds_zara02.ndjson', args)
-        write(biwi(sc, 'data/trajnet_original/crowds/crowds_zara03.txt'),
+        write(crowds(sc, 'data/raw/crowds/crowds_zara01.vsp'),
+              'output_pre/{split}/crowds_zara01.ndjson', args)
+        categorize(sc, 'output_pre/{split}/crowds_zara01.ndjson', args)
+        write(crowds(sc, 'data/raw/crowds/crowds_zara03.vsp'),
               'output_pre/{split}/crowds_zara03.ndjson', args)
         categorize(sc, 'output_pre/{split}/crowds_zara03.ndjson', args)
-        # write(crowds(sc, 'data/trajnet_original/crowds/crowds_zara03.vsp'),
-        #       'output_pre/{split}/crowds_zara03.ndjson', args)
-        # categorize(sc, 'output_pre/{split}/crowds_zara03.ndjson', args)
-        write(biwi(sc, 'data/trajnet_original/crowds/students001.txt'),
+        write(crowds(sc, 'data/raw/crowds/students001.vsp'),
               'output_pre/{split}/crowds_students001.ndjson', args)
         categorize(sc, 'output_pre/{split}/crowds_students001.ndjson', args)
-        write(biwi(sc, 'data/trajnet_original/crowds/students003.txt'),
+        write(crowds(sc, 'data/raw/crowds/students003.vsp'),
               'output_pre/{split}/crowds_students003.ndjson', args)
         categorize(sc, 'output_pre/{split}/crowds_students003.ndjson', args)
 
@@ -317,10 +305,10 @@ def main():
         # Note: Generate Trajectories First! See command below
         ## 'python -m trajnetdataset.controlled_data <args>'
         print("Manual Synthetic Data Converion")
-        write(controlled(sc, 'data/raw/controlled/orca_across_groups_4ped_200scenes_.txt'),
-              'output_pre/test/orca_across_groups_4ped_200scenes.ndjson', args)
-        categorize(sc, 'output_pre/test/orca_across_groups_4ped_200scenes.ndjson', args)
-        # edit_goal_file('orca_circle_crossing_5ped_1000scenes_.pkl', 'orca_five_synth.pkl')
+        write(controlled(sc, 'data/raw/controlled/orca_circle_crossing_5ped_1000scenes_.txt'),
+              'output_pre/{split}/orca_five_synth.ndjson', args)
+        categorize(sc, 'output_pre/{split}/orca_five_synth.ndjson', args)
+        edit_goal_file('orca_circle_crossing_5ped_1000scenes_.pkl', 'orca_five_synth.pkl')
 
 if __name__ == '__main__':
     main()

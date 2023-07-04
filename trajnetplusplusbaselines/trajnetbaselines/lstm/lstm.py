@@ -1,19 +1,18 @@
 import itertools
 import copy
+import math
 
 import numpy as np
 import torch
-from trajnetbaselines import residual_lstm
 
 import trajnetplusplustools
-
-from ..residual_lstm import ResLSTMLayer
-from ..residual_lstm import ResLSTMCell
 
 from .modules import Hidden2Normal, InputEmbedding
 
 from .. import augmentation
 from .utils import center_scene
+from scipy.optimize import minimize
+import torch.nn as nn
 
 NAN = float('nan')
 
@@ -45,9 +44,8 @@ def generate_pooling_inputs(obs2, obs1, hidden_cell_state, track_mask, batch_spl
 
     return curr_positions, prev_positions, curr_hidden_state, track_mask_positions
 
-
 class LSTM(torch.nn.Module):
-    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, residual=False, intent_pool = False):
+    def __init__(self, embedding_dim=64, hidden_dim=128, pool=None, pool_to_input=True, goal_dim=None, goal_flag=False, intent_pool = False):
         """ Initialize the LSTM forecasting model
 
         Attributes
@@ -68,6 +66,7 @@ class LSTM(torch.nn.Module):
         self.embedding_dim = embedding_dim
         self.pool = pool
         self.pool_to_input = pool_to_input
+
         ## Location
         scale = 4.0
         self.input_embedding = InputEmbedding(2, self.embedding_dim, scale)
@@ -83,15 +82,10 @@ class LSTM(torch.nn.Module):
         pooling_dim = 0
         if pool is not None and self.pool_to_input:
             pooling_dim = self.pool.out_dim 
-
-        if residual == True :
-            self.encoder = ResLSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
-            self.decoder = ResLSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
-        else :
-            ## LSTMs
-            self.encoder = torch.nn.LSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
-            self.decoder = torch.nn.LSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
-
+        
+        ## LSTMs
+        self.encoder = torch.nn.LSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
+        self.decoder = torch.nn.LSTMCell(self.embedding_dim + goal_rep_dim + pooling_dim, self.hidden_dim)
         # Predict the parameters of a multivariate normal:
         # mu_vel_x, mu_vel_y, sigma_vel_x, sigma_vel_y, rho
         self.hidden2normal = Hidden2Normal(self.hidden_dim)
@@ -121,18 +115,15 @@ class LSTM(torch.nn.Module):
             with respect to the current position
         """
         num_tracks = len(obs2)
-        # print(obs1.size())
         # mask for pedestrians absent from scene (partial trajectories)
         # consider only the hidden states of pedestrains present in scene
         track_mask = (torch.isnan(obs1[:, 0]) + torch.isnan(obs2[:, 0])) == 0
-        # print(len(hidden_cell_state[0]), len(hidden_cell_state[1]), sep=' | ')
-        # print(len(track_mask))
+
         ## Masked Hidden Cell State
         hidden_cell_stacked = [
             torch.stack([h for m, h in zip(track_mask, hidden_cell_state[0]) if m], dim=0),
             torch.stack([c for m, c in zip(track_mask, hidden_cell_state[1]) if m], dim=0),
         ]
-        # print(hidden_cell_stacked[0].size())
 
         ## Mask current velocity & embed
         curr_velocity = obs2 - obs1
@@ -167,11 +158,10 @@ class LSTM(torch.nn.Module):
 
         # LSTM step
         hidden_cell_stacked = lstm(input_emb, hidden_cell_stacked)
-        # print(hidden_cell_stacked[0].size())
         normal_masked = self.hidden2normal(hidden_cell_stacked[0])
 
         # unmask [Update hidden-states and next velocities of pedestrians]
-        normal = torch.full((track_mask.size(0), 5), NAN, device=obs1.device)
+        normal = torch.full((track_mask.size(0), 10), NAN, device=obs1.device)
         mask_index = [i for i, m in enumerate(track_mask) if m]
         for i, h, c, n in zip(mask_index,
                               hidden_cell_stacked[0],
@@ -211,7 +201,6 @@ class LSTM(torch.nn.Module):
         """
 
         assert ((prediction_truth is None) + (n_predict is None)) == 1
-        # print(observed.size())
         if n_predict is not None:
             # -1 because one prediction is done by the encoder already
             prediction_truth = [None for _ in range(n_predict - 1)]
@@ -247,17 +236,17 @@ class LSTM(torch.nn.Module):
         for obs1, obs2 in zip(observed[:-1], observed[1:]):
             ##LSTM Step
             hidden_cell_state, normal = self.step(self.encoder, hidden_cell_state, obs1, obs2, goals, batch_split, obs_first)
-            # print("HERE")
-            # print(hidden_cell_state[0].size)
+
             # concat predictions
             normals.append(normal)
             positions.append(obs2 + normal[:, :2])  # no sampling, just mean
-
+       
         # initialize predictions with last position to form velocity. DEEP COPY !!!
         prediction_truth = copy.deepcopy(list(itertools.chain.from_iterable(
             (observed[-1:], prediction_truth)
         )))
 
+        normals_dist = []
         # decoder, predictions
         for obs1, obs2 in zip(prediction_truth[:-1], prediction_truth[1:]):
             if obs1 is None:
@@ -274,6 +263,7 @@ class LSTM(torch.nn.Module):
 
             # concat predictions
             normals.append(normal)
+            normals_dist.append(normal)
             positions.append(obs2 + normal[:, :2])  # no sampling, just mean
 
         # Pred_scene: Tensor [seq_length, num_tracks, 2]
@@ -283,7 +273,9 @@ class LSTM(torch.nn.Module):
         rel_pred_scene = torch.stack(normals, dim=0)
         pred_scene = torch.stack(positions, dim=0)
 
-        return rel_pred_scene, pred_scene
+        # print("NORMALS actual shape: ", len(normals))
+        # print("OBS: ", observed.size())
+        return rel_pred_scene, pred_scene, normals_dist
 
 class LSTMPredictor(object):
     def __init__(self, model):
@@ -302,7 +294,57 @@ class LSTMPredictor(object):
     def load(filename):
         with open(filename, 'rb') as f:
             return torch.load(f)
+    def joint_pdf(self, xy,mu1, mu2, s1, s2, rho):
+        x1, x2 = xy[:,0], xy[:,1]
+        # mu1, mu2, s1, s2, rho = self.mu1x, self.mu1y, self.s1x, self.s1y, self.rho1
+        norm1 = x1 - mu1
+        norm2 = x2 - mu2
 
+        sigma1sigma2 = s1 * s2
+
+        z = (norm1 / s1) ** 2 + (norm2 / s2) ** 2 - 2 * rho * norm1 * norm2 / sigma1sigma2
+
+        numerator = np.exp(-z / (2 * (1 - rho ** 2)))
+        denominator = 2 * math.pi * sigma1sigma2 * np.sqrt(1 - rho ** 2)
+
+        return numerator/(0.01 + denominator)
+
+    def joint_pdf1(self, xy):
+        x1, x2 = xy[:,0], xy[:,1]
+        mu1, mu2, s1, s2, rho = self.mu1x, self.mu1y, self.s1x, self.s1y, self.rho1
+        norm1 = x1 - mu1
+        norm2 = x2 - mu2
+
+        sigma1sigma2 = s1 * s2
+
+        z = (norm1 / s1) ** 2 + (norm2 / s2) ** 2 - 2 * rho * norm1 * norm2 / sigma1sigma2
+
+        numerator = torch.exp(-z / (2 * (1 - rho ** 2)))
+        denominator = 2 * math.pi * sigma1sigma2 * torch.sqrt(1 - rho ** 2)
+
+        return numerator/denominator
+      
+    def joint_pdf2(self, xy):
+        x1, x2 = xy[:,0], xy[:,1]
+        mu1, mu2, s1, s2, rho = self.mu2x, self.mu2y, self.s2x, self.s2y, self.rho2
+        norm1 = x1 - mu1
+        norm2 = x2 - mu2
+
+        sigma1sigma2 = s1 * s2
+
+        z = (norm1 / s1) ** 2 + (norm2 / s2) ** 2 - 2 * rho * norm1 * norm2 / sigma1sigma2
+
+        numerator = torch.exp(-z / (2 * (1 - rho ** 2)))
+        denominator = 2 * math.pi * sigma1sigma2 * torch.sqrt(1 - rho ** 2)
+
+        return numerator/denominator
+      
+    def bimodal_joint_pdf(self,xy):
+        return self.joint_pdf1(xy) + self.joint_pdf2(xy)
+
+    # Define the negative of the bimodal joint PDF function for maximization
+    def negative_bimodal_joint_pdf(self,xy):
+        return -self.bimodal_joint_pdf(xy)
 
     def __call__(self, paths, scene_goal, n_predict=12, modes=1, predict_all=True, obs_length=9, start_length=0, args=None):
         self.model.eval()
@@ -320,16 +362,88 @@ class LSTMPredictor(object):
             batch_split = torch.Tensor(batch_split).long()
 
             multimodal_outputs = {}
-            for num_p in range(modes):
+            # md_outputs = 
+            # for num_p in range(modes):
                 # _, output_scenes = self.model(xy[start_length:obs_length], scene_goal, batch_split, xy[obs_length:-1].clone())
-                _, output_scenes = self.model(xy[start_length:obs_length], scene_goal, batch_split, n_predict=n_predict)
-                output_scenes = output_scenes.numpy()
-                if args.normalize_scene:
-                    output_scenes = augmentation.inverse_scene(output_scenes, rotation, center)
-                output_primary = output_scenes[-n_predict:, 0]
-                output_neighs = output_scenes[-n_predict:, 1:]
-                ## Dictionary of predictions. Each key corresponds to one mode
-                multimodal_outputs[num_p] = [output_primary, output_neighs]
+            _, output_scenes, normals = self.model(xy[start_length:obs_length], scene_goal, batch_split, n_predict=n_predict)
+            output_scenes = output_scenes.numpy()
+            # print(output_scenes)
+            md_outputs = np.stack([output_scenes for i in range(8)])
+            # print(len(md_outputs))
+            # print(len(normals))
+            # print(md_outputs[0].shape)
+            # print(normals[0].shape)
+            # normals = normals.numpy()
+            split = 0
+            for t in range(len(normals)):
+              normal = normals[t]
+              normal = normal.numpy()
+              curr_pos = output_scenes.shape[0] - len(normals) + t
+              prev_pos = curr_pos - 1
+
+              # print(curr_pos, prev_pos)
+
+              # for p in range(normal.size(0)):
+              #   mode1 = joint_pdf(normal[p])
+
+              p1 = normal[:,:2]
+              p2 = normal[:,5:7]
+
+              prob1 = self.joint_pdf(p1,normal[:,0],normal[:,1],normal[:,2],normal[:,3],normal[:,4])
+              prob2 = self.joint_pdf(p2,normal[:,5],normal[:,6],normal[:,7],normal[:,8],normal[:,9])
+
+              prob1 = np.nanmean(prob1)
+              prob2 = np.nanmean(prob2)
+              # print(prob1, prob2)
+              # continue
+
+              if abs(prob1-prob2) <= 20 and split<3:
+                split += 1
+                if split == 1:
+                  md_outputs[0:4, curr_pos] = md_outputs[0:4, prev_pos] + p1
+                  md_outputs[4:8, curr_pos] = md_outputs[4:8, prev_pos] + p2
+                elif split == 2:
+                  md_outputs[0:2, curr_pos] = md_outputs[0:2, prev_pos] + p1
+                  md_outputs[2:4, curr_pos] = md_outputs[2:4, prev_pos] + p2
+                  md_outputs[4:6, curr_pos] = md_outputs[4:6, prev_pos] + p1
+                  md_outputs[6:8, curr_pos] = md_outputs[6:8, prev_pos] + p2
+                elif split == 3:
+                  md_outputs[0:8:2, curr_pos] = md_outputs[0:8:2,prev_pos] + p1
+                  md_outputs[1:8:2, curr_pos] = md_outputs[1:8:2, prev_pos] + p2
+              else:
+                # print("Here")
+                p = p1
+                if prob2 > prob1:
+                  p = p2
+                
+                # output_scenes[curr_pos] = output_scenes[prev_pos]
+                # print(md_outputs[::, curr_pos])
+                # print(md_outputs[::, prev_pos])
+                md_outputs[::, curr_pos] = md_outputs[::, prev_pos] + p
+
+              # initial_point_mode1 = output_scenes[curr_pos]
+              # initial_point_mode2 = 2*output_scenes[prev_pos] - output_scenes[curr_pos]
+
+              # result_mode1 = minimize(self.negative_bimodal_joint_pdf, initial_point_mode1)
+
+              # # Perform the optimization for mode 2
+              # result_mode2 = minimize(self.negative_bimodal_joint_pdf, initial_point_mode2)
+
+              # maximum_point_mode1 = result_mode1.x
+              # maximum_point_mode2 = result_mode2.x
+
+              # print(maximum_point_mode1)
+
+
+            # if args.normalize_scene:
+            #     output_scenes = augmentation.inverse_scene(output_scenes, rotation, center)
+
+            for i in range(md_outputs.shape[0]):
+
+              output_primary = md_outputs[i, -n_predict:, 0]
+              output_neighs = md_outputs[i, -n_predict:, 1:]
+            ## Dictionary of predictions. Each key corresponds to one mode
+              multimodal_outputs[i] = [output_primary, output_neighs]
 
         ## Return Dictionary of predictions. Each key corresponds to one mode
         return multimodal_outputs

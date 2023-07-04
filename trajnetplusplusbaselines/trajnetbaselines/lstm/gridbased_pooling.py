@@ -141,7 +141,6 @@ class GridBasedPooling(torch.nn.Module):
 
         ## Generate Occupancy Map
         return self.occupancy(obs2, relative, past_obs=obs1)
-        
 
     def social(self, hidden_state, obs1, obs2):
         ## Makes the Social Grid

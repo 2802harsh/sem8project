@@ -29,27 +29,33 @@ class PredictionLoss(torch.nn.Module):
         """
 
         x1, x2 = x1x2[:, 0], x1x2[:, 1]
-        mu1, mu2, s1, s2, rho = (
-            mu1mu2s1s2rho[:, 0],
-            mu1mu2s1s2rho[:, 1],
-            mu1mu2s1s2rho[:, 2],
-            mu1mu2s1s2rho[:, 3],
-            mu1mu2s1s2rho[:, 4],
-        )
 
-        norm1 = x1 - mu1
-        norm2 = x2 - mu2
+        loss = 0
+        for i in [0,5]:
+          mu1, mu2, s1, s2, rho = (
+              mu1mu2s1s2rho[:, i+0],
+              mu1mu2s1s2rho[:, i+1],
+              mu1mu2s1s2rho[:, i+2],
+              mu1mu2s1s2rho[:, i+3],
+              mu1mu2s1s2rho[:, i+4],
+          )
 
-        sigma1sigma2 = s1 * s2
+          norm1 = x1 - mu1
+          norm2 = x2 - mu2
 
-        z = (norm1 / s1) ** 2 + (norm2 / s2) ** 2 - 2 * rho * norm1 * norm2 / sigma1sigma2
+          sigma1sigma2 = s1 * s2
 
-        numerator = torch.exp(-z / (2 * (1 - rho ** 2)))
-        denominator = 2 * math.pi * sigma1sigma2 * torch.sqrt(1 - rho ** 2)
+          z = (norm1 / s1) ** 2 + (norm2 / s2) ** 2 - 2 * rho * norm1 * norm2 / sigma1sigma2
 
-        return numerator / denominator
+          numerator = torch.exp(-z / (2 * (1 - rho ** 2)))
+          denominator = 2 * math.pi * sigma1sigma2 * torch.sqrt(1 - rho ** 2)
+
+          loss += numerator / denominator
+
+        return loss
 
     def forward(self, inputs, targets, batch_split, positions=None):
+        # print("Came to loss")
         pred_length, batch_size = targets.size(0), batch_split[:-1].size(0)
         ## Extract primary pedestrians
         # [pred_length, num_tracks, 2] --> [pred_length, batch_size, 2]
@@ -68,12 +74,15 @@ class PredictionLoss(torch.nn.Module):
         inputs = inputs.transpose(0, 1)
 
         ## Loss calculation
-        inputs = inputs.reshape(-1, 5)
+        inputs = inputs.reshape(-1, 10)
         targets = targets.reshape(-1, 2)
         inputs_bg = inputs.clone()
         inputs_bg[:, 2] = 3.0  # sigma_x
         inputs_bg[:, 3] = 3.0  # sigma_y
         inputs_bg[:, 4] = 0.0  # rho
+        inputs_bg[:, 7] = 3.0  # sigma_x
+        inputs_bg[:, 8] = 3.0  # sigma_y
+        inputs_bg[:, 9] = 0.0  # rho
 
         values = -torch.log(
             0.01 +
